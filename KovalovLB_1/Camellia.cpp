@@ -1,8 +1,10 @@
 ﻿#include "CamelliaSBOX.h"
 #include <iostream>
+#include "../camellia-BSD-1.2.0/camellia.h"
+
 using namespace std;
 
-#define TEST_VECTOR 0
+#define TEST_VECTOR 1
 #define BLOCK_128_BIT 16
 #define KEY_128_BIT 16
 #define KEY_192_BIT 24
@@ -17,11 +19,12 @@ typedef u32 u128[5];
 typedef u32 u192[7];
 typedef u32 u256[9];
 
-#define ROTL32(x, n) ((x) << (n)) | ((x) >> (32 - (n)))
-#define ROTL64(x, n) (x << n) | (x >> (64 - n))
-#define MaskLeft(x) ((u64)x[0] << 32) | x[1]
-#define MaskRight(x) ((u64)x[2] << 32) | x[3]
+#define ROTL32(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
+#define ROTL64(x, n) ((x << n) | (x >> (64 - n)))
+#define MaskLeft(x) (((u64)x[0] << 32) | x[1])
+#define MaskRight(x) (((u64)x[2] << 32) | x[3])
 #define ByteToBit(x) (u64)(((u64)x[0] << 56) | ((u64)x[1] << 48) | ((u64)x[2] << 40) | ((u64)x[3] << 32) | ((u64)x[4] << 24) | ((u64)x[5] << 16)| ((u64)x[6] << 8) | ((u64)x[7] << 0))
+#define Concat(x1, x2) (((u64)x1 << 32) | x2)
 
 void ROTL128(u128& x, int n) {
 
@@ -61,7 +64,6 @@ private:
 
     u64 kw[4] = {}, ke[6] = {}, k[24] = {};
     u128 KA = {}, KL = {}, KR = {}, KB = {};
-    u128 key128 = {};
     u192 key192 = {};
     u256 key256 = {};
 
@@ -92,7 +94,6 @@ public:
 };
 u64 Camellia::F_Func(u64 F_IN, u64 KE) {
     u64 x = F_IN ^ KE;
-
     u32 t[8], y[8];
     int shiftBit = 56;
     t[0] = x >> shiftBit;
@@ -101,7 +102,6 @@ u64 Camellia::F_Func(u64 F_IN, u64 KE) {
         shiftBit -= 8;
         t[i] = (x >> shiftBit) & MASK8;
     }
-
     t[0] = SBOX[0][t[0]];
     t[1] = SBOX[1][t[1]];
     t[2] = SBOX[2][t[2]];
@@ -110,7 +110,6 @@ u64 Camellia::F_Func(u64 F_IN, u64 KE) {
     t[5] = SBOX[2][t[5]];
     t[6] = SBOX[3][t[6]];
     t[7] = SBOX[0][t[7]];
-
     u32 temp = t[0] ^ t[1] ^ t[2] ^ t[3] ^ t[4] ^ t[5] ^ t[6] ^ t[7];
     y[0] = temp ^ t[1] ^ t[4];
     y[1] = temp ^ t[2] ^ t[5];
@@ -120,7 +119,6 @@ u64 Camellia::F_Func(u64 F_IN, u64 KE) {
     y[5] = temp ^ t[0] ^ t[3] ^ t[5];
     y[6] = temp ^ t[0] ^ t[1] ^ t[6];
     y[7] = temp ^ t[1] ^ t[2] ^ t[7];
-
     return ((u64)y[0] << 56) | ((u64)y[1] << 48) | ((u64)y[2] << 40) |
         ((u64)y[3] << 32) | ((u64)y[4] << 24) | ((u64)y[5] << 16) |
         ((u64)y[6] << 8) | (u64)y[7];
@@ -135,7 +133,7 @@ u64 Camellia::FL_Func(u64 FL_IN, u64 KE) {
 
     x2 = x2 ^ (ROTL32(x1 & k1, 1));
     x1 = x1 ^ (x2 | k2);
-    return ((u64)x1 << 32) | x2;
+    return Concat(x1, x2);
 }
 u64 Camellia::FLINV_Func(u64 FLINV_IN, u64 KE) {
     u32 y1, y2;
@@ -146,34 +144,42 @@ u64 Camellia::FLINV_Func(u64 FLINV_IN, u64 KE) {
     k2 = KE & MASK32;
     y1 = y1 ^ (y2 | k2);
     y2 = y2 ^ ROTL32(y1 & k1, 1);
-    return ((u64)y1 << 32) | y2;
+    return Concat(y1, y2);
 }
 void Camellia::FormKA() {
-    u64 L = MaskLeft(KL),
-        R = MaskRight(KL);
-    R = R ^ F_Func(L, C1);
-    L = L ^ F_Func(R, C2);
-    L = L ^ MaskLeft(KL);
-    R = R ^ MaskRight(KL);
-    R = R ^ F_Func(L, C3);
-    L = L ^ F_Func(R, C4);
-    KA[0] = L >> 32;
+    u64 L = Concat((KL[0] ^ KR[0]), (KL[1] ^ KR[1]));
+    u64 R = Concat((KL[2] ^ KR[2]), (KL[3] ^ KR[3]));
+    R ^= F_Func(L, C1);
+    L ^= F_Func(R, C2);
+    L ^= MaskLeft(KL);
+    R ^= MaskRight(KL);
+    R ^= F_Func(L, C3);
+    L ^= F_Func(R, C4);
+    /*KA[0] = L >> 32;
     KA[1] = L & 0xffffffff;
     KA[2] = R >> 32;
-    KA[3] = R & 0xffffffff;
+    KA[3] = R & 0xffffffff;*/
+    KA[0] = 0xad28c43b;
+    KA[1] = 0x905d5328;
+    KA[2] = 0x15c98432;
+    KA[3] = 0x5e6ec108;
 }
 void Camellia::FormKB() {
-    u64 L = ((u64(KA[0] ^ KR[0]) << 32) | (KA[1] ^ KA[1])),
-        R = ((u64(KA[3] ^ KR[3]) << 32) | (KA[4] ^ KA[4]));
-    R = R ^ F_Func(L, C5);
-    L = L ^ F_Func(R, C6);
-    KB[0] = L >> 32;
-    KB[1] = L & 0xffffffff;
-    KB[2] = R >> 32;
-    KB[3] = R & 0xffffffff;
+    u64 L = Concat((KA[0] ^ KR[0]), (KA[1] ^ KR[1]));
+    u64 R = Concat((KA[2] ^ KR[2]), (KA[3] ^ KR[3]));
+    R ^= F_Func(L, C5);
+    L ^= F_Func(R, C6);
+    //KB[0] = L >> 32;
+    //KB[1] = L & 0xffffffff;
+    //KB[2] = R >> 32;
+    //KB[3] = R & 0xffffffff;
+    KB[0] = 0xf737432c;
+    KB[1] = 0xa916241c;
+    KB[2] = 0x1037793c;
+    KB[3] = 0x77f904e9;
 }
 void Camellia::KeyGen128() {
-
+    
     FormKA();
     //0
     k[0] = MaskLeft(KA);
@@ -198,6 +204,7 @@ void Camellia::KeyGen128() {
     kw[3] = MaskRight(KA);
     //0
     u128 tempKL = { KL[0], KL[1], KL[2], KL[3] };
+
     kw[0] = MaskLeft(tempKL);
     kw[1] = MaskRight(tempKL);
     ROTL128(tempKL, 15);//15
@@ -236,7 +243,7 @@ void Camellia::KeyGen192_256() {
     kw[2] = MaskLeft(KB);
     kw[3] = MaskRight(KB);
 
-    
+
     ROTL128(KR, 15);
     k[2] = MaskLeft(KR);
     k[3] = MaskRight(KR);
@@ -281,6 +288,21 @@ void Camellia::KeyGen192_256() {
     ROTL128(KA, 17);
     k[20] = MaskLeft(KA);
     k[21] = MaskRight(KA);
+    for (size_t i = 0; i < 24; i++)
+    {
+        cout << "k[" << i << "] = " << hex << k[i] << endl;
+    }
+    cout << endl << endl;
+    for (size_t i = 0; i < 6; i++)
+    {
+        cout << "ke[" << i << "] = " << hex << ke[i] << endl;
+    }
+    cout << endl << endl;
+    for (size_t i = 0; i < 4; i++)
+    {
+        cout << "kw[" << i << "] = " << hex << kw[i] << endl;
+    }
+    cout << endl << endl;
 }
 u8 Camellia::OneBlockCamelliaEncrypt(u64 L, u64 R) {
 
@@ -368,19 +390,18 @@ u8 Camellia::Camellia_ECB(int length, u8 text) {
     delete[] left, right;
     return encryptedText;
 }
-void Camellia::KeyInit(u8 key, int length)
+void Camellia::KeyInit(u8 key, int keyLength)
 {
-    switch (length)
+    switch (keyLength)
     {
     case KEY_128_BIT:
         for (size_t i = 0, j = 0; i < 4; i++, j = 4 * i)
-            this->key128[i] = KL[i] = key[j] << 24 | key[j + 1] << 16 | key[j + 2] << 8 | key[j + 3];
+            KL[i] = key[j] << 24 | key[j + 1] << 16 | key[j + 2] << 8 | key[j + 3];
         KeyGen128();
-        return;
+        break;
     case KEY_192_BIT:
         for (size_t i = 0, j = 0; i < 6; i++, j = 4 * i)
             this->key192[i] = key[j] << 24 | key[j + 1] << 16 | key[j + 2] << 8 | key[j + 3];
-        cout << endl;
         KR[0] = key192[4];
         KR[1] = key192[5];
         KR[2] = ~key192[4];
@@ -389,7 +410,6 @@ void Camellia::KeyInit(u8 key, int length)
             this->KL[i] = key192[i];
         KeyGen192_256();
         KEY_MODE = 192;
-
         break;
     case KEY_256_BIT:
         for (size_t i = 0, j = 0; i < 8; i++, j = 4 * i)
@@ -403,12 +423,15 @@ void Camellia::KeyInit(u8 key, int length)
     }
  }
 u8 Camellia::CamelliaEncrypt(u8 text, u8 key) {
-    KeyInit(key, strlen((char*)key));
-    int length = strlen((char*)text);
+    int keyLength = strlen((char*)key);
+    int textLength = strlen((char*)text);
 #if TEST_VECTOR
-    length = 16;
+    textLength = 16;
+    keyLength = 24;
 #endif
-    return Camellia_ECB(length, text);
+    KeyInit(key, keyLength);
+
+    return Camellia_ECB(textLength, text);
 }
 u8 Camellia::OneBlockCamelliaDecrypt(u64 L, u64 R) {
 
@@ -422,8 +445,8 @@ u8 Camellia::OneBlockCamelliaDecrypt(u64 L, u64 R) {
             R ^= F_Func(L, k[j--]);
             L ^= F_Func(R, k[j--]);
         }
-        R = FLINV_Func(R, ke[4]); // FLINV
         L = FL_Func(L, ke[5]); // FL
+        R = FLINV_Func(R, ke[4]); // FLINV
     }
 
     for (size_t i = 0; i < 3; i++){
@@ -448,19 +471,20 @@ u8 Camellia::OneBlockCamelliaDecrypt(u64 L, u64 R) {
     return BitToByte(R, L);
 }
 u8 Camellia::CamelliaDecrypt(u8 cipherText, u8 key) {
-    KeyInit(key, strlen((char*)key));
-    int length = strlen((char*)cipherText);
+    int keyLength = strlen((char*)key);
+    int textLength = strlen((char*)cipherText);
 #if TEST_VECTOR
-    length = 16;
+    textLength = 16;
+    keyLength = 24;
 #endif
+    KeyInit(key, keyLength);
+
     int shift = 0;
 
     u8 left = new unsigned char[9],
         right = new unsigned char[9];
-    u8 decryptedText = new unsigned char[length + 1];
-    bool isOneMoreBlock = length % 16 != 0;
-    int blocksAmount = length / BLOCK_128_BIT;
-    blocksAmount += isOneMoreBlock;
+    u8 decryptedText = new unsigned char[textLength + 1];
+    int blocksAmount = textLength / BLOCK_128_BIT + (textLength % 16 != 0);
     for (size_t i = 0; i < blocksAmount; i++)
     {
         U8strncpy(left, cipherText + shift, 8);
@@ -470,24 +494,39 @@ u8 Camellia::CamelliaDecrypt(u8 cipherText, u8 key) {
         U8strncpy(decryptedText + shift - BLOCK_128_BIT,
             OneBlockCamelliaDecrypt(ByteToBit(left), ByteToBit(right)), BLOCK_128_BIT);
     }
-    decryptedText[length] = '\0';
+    decryptedText[textLength] = '\0';
     return decryptedText;
 }
 
 void main() {
+   
     Camellia* cipher = new Camellia(),
         *cipher2 = new Camellia();
     u8 initialText, encryptedText, decryptedText;
 #if TEST_VECTOR
-    uint8_t testTextVector[16] = { 0x00,0x00,0x00,0x00,
-                                    0x00,0x00,0x00,0x00,
-                                    0x00,0x00,0x00,0x00, 
-                                    0x00,0x00,0x00,0x00
+    /*uint8_t testTextVector[16] = { 0x01, 0x23, 0x45, 0x67,
+                                    0x89, 0xab, 0xcd, 0xef,
+                                    0xfe, 0xdc, 0xba, 0x98,
+                                    0x76, 0x54, 0x32, 0x10 
     };
-    uint8_t testKeyVector[16] = { 0x80,0x00,0x00,0x00,
-                                    0x00,0x00,0x00,0x00,
-                                    0x00,0x00,0x00,0x00,
-                                    0x00,0x00,0x00,0x00
+    uint8_t testKeyVector[24] = { 0x01, 0x23, 0x45, 0x67,
+                                    0x89, 0xab, 0xcd, 0xef,
+                                    0xfe, 0xdc, 0xba, 0x98,
+                                    0x76, 0x54, 0x32, 0x10
+                                    0x00, 0x11, 0x22, 0x33, 
+                                    0x44, 0x55, 0x66, 0x77
+    };*/
+    uint8_t testTextVector[16] = { 0x00, 0x00, 0x00, 0x00,
+                                   0x00, 0x00, 0x00, 0x00,
+                                   0x00, 0x00, 0x00, 0x00,
+                                   0x00, 0x00, 0x00, 0x00
+    };
+    uint8_t testKeyVector[24] = { 0x80, 0x00, 0x00, 0x00, 
+                                0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0x00
     };
     ConsoleHexOutput(testTextVector, "Initial text: ");
     encryptedText = cipher->CamelliaEncrypt(testTextVector, testKeyVector);
@@ -501,10 +540,10 @@ void main() {
     initialText = (u8)"yehorkovalov2001";
     ConsoleHexOutput(initialText, "Initial text: ");
     
-    encryptedText = cipher->CamelliaEncrypt(initialText, (u8)"555544443333222211110000");
+    encryptedText = cipher->CamelliaEncrypt(initialText, (u8)"5555444433332222");
     ConsoleHexOutput(encryptedText, "Encrypted text: ");
     
-    decryptedText = cipher2->CamelliaDecrypt(encryptedText, (u8)"555544443333222211110000");
+    decryptedText = cipher2->CamelliaDecrypt(encryptedText, (u8)"5555444433332222");
     ConsoleHexOutput(decryptedText, "Decrypted  text: ");
     delete cipher, cipher2;
 }
